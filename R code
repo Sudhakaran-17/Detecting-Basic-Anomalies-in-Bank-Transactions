@@ -1,0 +1,112 @@
+# app.R: Creative Shiny App for Bank Transaction Anomaly Detection 
+# Place this file and your transactions.csv in the same directory, then run `shiny::runApp(".")` 
+library(shiny) 
+library(dplyr) 
+library(ggplot2) 
+library(DT) 
+ui <- fluidPage( 
+titlePanel("      
+sidebarLayout( 
+sidebarPanel( 
+Bank Transaction Anomaly Detector    
+h4("Step 1: Upload Data"), 
+fileInput("file", "   
+"), 
+Upload CSV File", accept = c(".csv")), 
+h4("Step 2: Set Filters"), 
+dateRangeInput("dates", "                
+Filter by Date Range:", start = Sys.Date() - 150, end = 
+Sys.Date()), 
+numericInput("z_thresh", "    
+numericInput("iqr_coef", "           
+actionButton("run", "        
+Z-score Threshold:", value = 3, min = 0, step = 0.5), 
+IQR Coefficient:", value = 1.5, min = 0, step = 0.1), 
+Run Detection", class = "btn-primary"), 
+br(), br(), 
+helpText("Adjust thresholds to fine-tune anomaly detection.") 
+), 
+mainPanel( 
+tabsetPanel( 
+tabPanel("            
+tabPanel("       
+tabPanel("    
+tabPanel("         
+) 
+) 
+) 
+) 
+Raw Data", DTOutput("table")), 
+Anomalies", DTOutput("anomalyTable")), 
+Histogram", plotOutput("histPlot")), 
+Summary", verbatimTextOutput("summaryText")) 
+server <- function(input, output, session) { 
+data <- eventReactive(input$run, { 
+req(input$file) 
+df <- read.csv(input$file$datapath, stringsAsFactors = FALSE) 
+df$Date <- as.Date(df$Date) 
+    if (!is.null(input$dates)) { 
+      df <- df %>% filter(Date >= input$dates[1] & Date <= input$dates[2]) 
+    } 
+    df 
+  }) 
+ 
+  processed <- reactive({ 
+    df <- data() 
+    mean_amt <- mean(df$Amount) 
+    sd_amt <- sd(df$Amount) 
+    df <- df %>% 
+      mutate( 
+        Amount_Z = (Amount - mean_amt) / sd_amt, 
+        Anomaly_Z = abs(Amount_Z) > input$z_thresh 
+      ) 
+    Q1 <- quantile(df$Amount, 0.25) 
+    Q3 <- quantile(df$Amount, 0.75) 
+    IQRv <- Q3 - Q1 
+    lower <- Q1 - input$iqr_coef * IQRv 
+    upper <- Q3 + input$iqr_coef * IQRv 
+    df <- df %>% 
+      mutate( 
+        Anomaly_IQR = (Amount < lower) | (Amount > upper) 
+      ) 
+    df 
+  }) 
+ 
+  output$table <- renderDT({ 
+    datatable(data(), options = list(pageLength = 10, scrollX = TRUE)) 
+  }) 
+ 
+  output$anomalyTable <- renderDT({ 
+    df <- processed() 
+    datatable(df %>% filter(Anomaly_Z | Anomaly_IQR), options = list(pageLength = 10, 
+scrollX = TRUE)) 
+  }) 
+ 
+  output$histPlot <- renderPlot({ 
+    df <- processed() 
+    Q1 <- quantile(df$Amount, 0.25) 
+    Q3 <- quantile(df$Amount, 0.75) 
+    IQRv <- Q3 - Q1 
+    lower <- Q1 - input$iqr_coef * IQRv 
+    upper <- Q3 + input$iqr_coef * IQRv 
+    ggplot(df, aes(x = Amount)) + 
+geom_histogram(bins = 50, fill = "#66b2ff", color = "black") + 
+geom_vline(xintercept = c(lower, upper), linetype = "dashed", color = "red", size = 1) + 
+labs( 
+title = "      
+Transaction Amount Distribution with IQR Bounds", 
+x = "Transaction Amount", 
+y = "Frequency" 
+) + 
+theme_minimal() 
+}) 
+output$summaryText <- renderPrint({ 
+df <- processed() 
+cat("Summary of Anomaly Detection:\n") 
+cat("Total Transactions:", nrow(df), "\n") 
+cat("Anomalies (Z-Score):", sum(df$Anomaly_Z), "\n") 
+cat("Anomalies (IQR):", sum(df$Anomaly_IQR), "\n") 
+cat("Unique Accounts:", length(unique(df$AccountID)), "\n") 
+}) 
+} 
+shinyApp(ui = ui, server = server)
